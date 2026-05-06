@@ -23,7 +23,7 @@ public class TransactionController {
     @Operation(summary = "Transfer money between accounts")
     public ResponseEntity<TransactionResponse> transfer(
             @Valid @RequestBody TransferRequest req,
-            @RequestHeader("X-Auth-User", defaultValue = "anonymous") String username) {
+            @RequestHeader(value="X-Auth-User", defaultValue = "anonymous") String username) {
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(transactionService.transfer(req, username));
     }
@@ -32,7 +32,7 @@ public class TransactionController {
     @Operation(summary = "Deposit money into an account")
     public ResponseEntity<TransactionResponse> deposit(
             @Valid @RequestBody DepositRequest req,
-            @RequestHeader("X-Auth-User",defaultValue = "anonymous") String username) {
+            @RequestHeader(value="X-Auth-User",defaultValue = "anonymous") String username) {
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(transactionService.deposit(req, username));
     }
