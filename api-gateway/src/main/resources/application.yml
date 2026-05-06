@@ -1,0 +1,73 @@
+server:
+  port: 8080
+  netty:
+    max-initial-line-length: 65536
+    max-header-size: 65536
+
+spring:
+  application:
+    name: api-gateway
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.security.reactive.ReactiveSecurityAutoConfiguration
+      - org.springframework.boot.autoconfigure.security.reactive.ReactiveUserDetailsServiceAutoConfiguration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+      password: ${REDIS_PASSWORD:nexabank_redis}
+  cloud:
+    gateway:
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+      routes:
+        - id: auth-service
+          uri: http://${AUTH_SERVICE_HOST:localhost}:8081
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - StripPrefix=1
+        - id: account-service
+          uri: http://${ACCOUNT_SERVICE_HOST:localhost}:8082
+          predicates:
+            - Path=/api/accounts/**
+          filters:
+            - StripPrefix=1
+        - id: transaction-service
+          uri: http://${TRANSACTION_SERVICE_HOST:localhost}:8083
+          predicates:
+            - Path=/api/transactions/**
+          filters:
+            - StripPrefix=1
+        - id: audit-service
+          uri: http://${AUDIT_SERVICE_HOST:localhost}:8085
+          predicates:
+            - Path=/api/audit/**
+          filters:
+            - StripPrefix=1
+        - id: ai-service
+          uri: http://${AI_SERVICE_HOST:localhost}:8086
+          predicates:
+            - Path=/api/ai/**
+          filters:
+            - StripPrefix=1
+
+jwt:
+  secret: ${JWT_SECRET:nexabank-super-secret-key-for-jwt-signing-must-be-256-bits-long}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,gateway
+
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    com.nexabank: DEBUG

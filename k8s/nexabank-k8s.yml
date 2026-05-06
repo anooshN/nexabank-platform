@@ -1,0 +1,354 @@
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nexabank
+  labels:
+    app: nexabank
+
+---
+# ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexabank-config
+  namespace: nexabank
+data:
+  KAFKA_BROKERS: "kafka-service:9092"
+  REDIS_HOST: "redis-service"
+  MONGO_HOST: "mongodb-service"
+  RABBITMQ_HOST: "rabbitmq-service"
+
+---
+# Secret (base64 encoded — replace values!)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nexabank-secrets
+  namespace: nexabank
+type: Opaque
+stringData:
+  JWT_SECRET: "nexabank-super-secret-key-for-jwt-signing-must-be-256-bits-long"
+  DB_PASSWORD: "nexabank123"
+  REDIS_PASSWORD: "nexabank_redis"
+  RABBITMQ_PASSWORD: "nexabank123"
+  MONGO_PASSWORD: "nexabank123"
+  OPENAI_API_KEY: "sk-your-openai-key-here"
+  MAIL_PASSWORD: "your-app-password"
+
+---
+# API Gateway Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: nexabank
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: ghcr.io/YOUR_ORG/nexabank-api-gateway:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: nexabank-config
+            - secretRef:
+                name: nexabank-secrets
+          env:
+            - name: AUTH_SERVICE_HOST
+              value: auth-service
+            - name: ACCOUNT_SERVICE_HOST
+              value: account-service
+            - name: TRANSACTION_SERVICE_HOST
+              value: transaction-service
+            - name: NOTIFICATION_SERVICE_HOST
+              value: notification-service
+            - name: AUDIT_SERVICE_HOST
+              value: audit-service
+            - name: AI_SERVICE_HOST
+              value: ai-service
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: nexabank
+spec:
+  type: LoadBalancer
+  selector:
+    app: api-gateway
+  ports:
+    - port: 80
+      targetPort: 8080
+
+---
+# Auth Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: nexabank
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+        - name: auth-service
+          image: ghcr.io/YOUR_ORG/nexabank-auth-service:latest
+          ports:
+            - containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: nexabank-config
+            - secretRef:
+                name: nexabank-secrets
+          env:
+            - name: DB_HOST
+              value: postgres-auth-service
+            - name: DB_NAME
+              value: nexabank_auth
+            - name: DB_USER
+              value: nexabank
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 90
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: nexabank
+spec:
+  selector:
+    app: auth-service
+  ports:
+    - port: 8081
+      targetPort: 8081
+
+---
+# Transaction Service with HPA
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transaction-service
+  namespace: nexabank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: transaction-service
+  template:
+    metadata:
+      labels:
+        app: transaction-service
+    spec:
+      containers:
+        - name: transaction-service
+          image: ghcr.io/YOUR_ORG/nexabank-transaction-service:latest
+          ports:
+            - containerPort: 8083
+          envFrom:
+            - configMapRef:
+                name: nexabank-config
+            - secretRef:
+                name: nexabank-secrets
+          env:
+            - name: DB_HOST
+              value: postgres-transactions-service
+            - name: DB_NAME
+              value: nexabank_transactions
+            - name: DB_USER
+              value: nexabank
+            - name: ACCOUNT_SERVICE_HOST
+              value: account-service
+            - name: AI_SERVICE_HOST
+              value: ai-service
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-service
+  namespace: nexabank
+spec:
+  selector:
+    app: transaction-service
+  ports:
+    - port: 8083
+      targetPort: 8083
+
+---
+# HPA for Transaction Service (handles 20K+ TPS)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: transaction-service-hpa
+  namespace: nexabank
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: transaction-service
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+---
+# AI Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-service
+  namespace: nexabank
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-service
+  template:
+    metadata:
+      labels:
+        app: ai-service
+    spec:
+      containers:
+        - name: ai-service
+          image: ghcr.io/YOUR_ORG/nexabank-ai-service:latest
+          ports:
+            - containerPort: 8086
+          envFrom:
+            - configMapRef:
+                name: nexabank-config
+            - secretRef:
+                name: nexabank-secrets
+          env:
+            - name: DB_HOST
+              value: postgres-ai-service
+            - name: DB_NAME
+              value: nexabank_ai
+            - name: DB_USER
+              value: nexabank
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-service
+  namespace: nexabank
+spec:
+  selector:
+    app: ai-service
+  ports:
+    - port: 8086
+      targetPort: 8086
+
+---
+# Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nexabank-ingress
+  namespace: nexabank
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - nexabank.yourdomain.com
+      secretName: nexabank-tls
+  rules:
+    - host: nexabank.yourdomain.com
+      http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 80
+          - path: /admin(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-react
+                port:
+                  number: 80
+          - path: /(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-angular
+                port:
+                  number: 80

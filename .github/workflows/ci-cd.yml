@@ -1,0 +1,147 @@
+name: NexaBank CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/nexabank
+
+jobs:
+  # ─────────────────────────────────────────────
+  # TEST ALL JAVA SERVICES
+  # ─────────────────────────────────────────────
+  test-java:
+    name: Test Java Services
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: nexabank_test
+          POSTGRES_USER: nexabank
+          POSTGRES_PASSWORD: nexabank123
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports: [ "5432:5432" ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+      - name: Run tests
+        run: mvn test -pl auth-service,account-service,transaction-service --no-transfer-progress
+        env:
+          DB_HOST: localhost
+          JWT_SECRET: test-secret-key-for-ci-minimum-32-chars-long
+
+  # ─────────────────────────────────────────────
+  # BUILD AND PUSH DOCKER IMAGES
+  # ─────────────────────────────────────────────
+  build-and-push:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: test-java
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service:
+          - api-gateway
+          - auth-service
+          - account-service
+          - transaction-service
+          - notification-service
+          - audit-service
+          - ai-service
+          - frontend-angular
+          - frontend-react
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─────────────────────────────────────────────
+  # SECURITY SCAN
+  # ─────────────────────────────────────────────
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test-java
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ─────────────────────────────────────────────
+  # DEPLOY TO KUBERNETES
+  # ─────────────────────────────────────────────
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.29.0'
+      - name: Set Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+      - name: Update image tags
+        run: |
+          for svc in api-gateway auth-service account-service transaction-service notification-service audit-service ai-service; do
+            kubectl set image deployment/$svc $svc=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-$svc:${{ github.sha }} \
+              -n nexabank --record || true
+          done
+      - name: Wait for rollout
+        run: |
+          for svc in api-gateway auth-service account-service transaction-service; do
+            kubectl rollout status deployment/$svc -n nexabank --timeout=300s
+          done
+      - name: Smoke test
+        run: |
+          GATEWAY_IP=$(kubectl get svc api-gateway -n nexabank -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          curl -f http://$GATEWAY_IP/actuator/health || exit 1

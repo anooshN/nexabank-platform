@@ -1,0 +1,27 @@
+server:
+  port: 8085
+spring:
+  application:
+    name: audit-service
+  data:
+    mongodb:
+      uri: mongodb://${MONGO_USER:nexabank}:${MONGO_PASSWORD:nexabank123}@${MONGO_HOST:localhost}:27017/${MONGO_DB:nexabank_audit}?authSource=admin
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      group-id: audit-service-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      properties:
+        spring.json.trusted.packages: "*"
+jwt:
+  secret: ${JWT_SECRET:nexabank-super-secret-key-for-jwt-signing-must-be-256-bits-long}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+logging:
+  level:
+    com.nexabank: DEBUG

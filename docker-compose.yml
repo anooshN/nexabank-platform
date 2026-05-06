@@ -1,0 +1,441 @@
+version: "3.9"
+
+# =============================================================
+#  NexaBank - Full Local Stack
+#  Run: docker-compose up -d
+#  Portal: http://localhost:4200
+#  Admin:  http://localhost:3000
+#  Swagger Gateway: http://localhost:8080/swagger-ui.html
+# =============================================================
+
+networks:
+  nexabank-net:
+    driver: bridge
+
+volumes:
+  postgres_auth_data:
+  postgres_accounts_data:
+  postgres_transactions_data:
+  postgres_ai_data:
+  mongodb_data:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+
+x-common-env: &common-env
+  JWT_SECRET: nexabank-super-secret-key-for-jwt-signing-must-be-256-bits-long-at-least-32-chars
+  KAFKA_BROKERS: kafka:9092
+  REDIS_HOST: redis
+  REDIS_PASSWORD: nexabank_redis
+
+x-java-defaults: &java-defaults
+  restart: unless-stopped
+  networks:
+    - nexabank-net
+  depends_on:
+    kafka:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+
+  # ─────────────────────────────────────────────
+  # INFRASTRUCTURE
+  # ─────────────────────────────────────────────
+
+  postgres-auth:
+    image: postgres:16-alpine
+    container_name: nexabank-postgres-auth
+    environment:
+      POSTGRES_DB: nexabank_auth
+      POSTGRES_USER: nexabank
+      POSTGRES_PASSWORD: nexabank123
+    volumes:
+      - postgres_auth_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - nexabank-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexabank -d nexabank_auth"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-accounts:
+    image: postgres:16-alpine
+    container_name: nexabank-postgres-accounts
+    environment:
+      POSTGRES_DB: nexabank_accounts
+      POSTGRES_USER: nexabank
+      POSTGRES_PASSWORD: nexabank123
+    volumes:
+      - postgres_accounts_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - nexabank-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexabank -d nexabank_accounts"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-transactions:
+    image: postgres:16-alpine
+    container_name: nexabank-postgres-transactions
+    environment:
+      POSTGRES_DB: nexabank_transactions
+      POSTGRES_USER: nexabank
+      POSTGRES_PASSWORD: nexabank123
+    volumes:
+      - postgres_transactions_data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    networks:
+      - nexabank-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexabank -d nexabank_transactions"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-ai:
+    image: pgvector/pgvector:pg16
+    container_name: nexabank-postgres-ai
+    environment:
+      POSTGRES_DB: nexabank_ai
+      POSTGRES_USER: nexabank
+      POSTGRES_PASSWORD: nexabank123
+    volumes:
+      - postgres_ai_data:/var/lib/postgresql/data
+    ports:
+      - "5435:5432"
+    networks:
+      - nexabank-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexabank -d nexabank_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:7.0
+    container_name: nexabank-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: nexabank
+      MONGO_INITDB_ROOT_PASSWORD: nexabank123
+      MONGO_INITDB_DATABASE: nexabank_audit
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - nexabank-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: nexabank-redis
+    command: redis-server --requirepass nexabank_redis --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - nexabank-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "nexabank_redis", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: nexabank-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+    networks:
+      - nexabank-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: nexabank-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_NUM_PARTITIONS: 12
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    ports:
+      - "29092:29092"
+    networks:
+      - nexabank-net
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: nexabank-kafka-ui
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: nexabank-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "9090:8080"
+    networks:
+      - nexabank-net
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: nexabank-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: nexabank
+      RABBITMQ_DEFAULT_PASS: nexabank123
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # Management UI
+    networks:
+      - nexabank-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # MICROSERVICES
+  # ─────────────────────────────────────────────
+
+   auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    container_name: nexabank-auth
+    <<: *java-defaults
+    environment:
+      <<: *common-env
+      DB_HOST: postgres-auth
+      DB_NAME: nexabank_auth
+      DB_USER: nexabank
+      DB_PASSWORD: nexabank123
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+
+  account-service:
+    build:
+      context: ./account-service
+      dockerfile: Dockerfile
+    container_name: nexabank-accounts
+    <<: *java-defaults
+    environment:
+      <<: *common-env
+      DB_HOST: postgres-accounts
+      DB_NAME: nexabank_accounts
+      DB_USER: nexabank
+      DB_PASSWORD: nexabank123
+    depends_on:
+      postgres-accounts:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+
+  transaction-service:
+    build:
+      context: ./transaction-service
+      dockerfile: Dockerfile
+    container_name: nexabank-transactions
+    <<: *java-defaults
+    environment:
+      <<: *common-env
+      DB_HOST: postgres-transactions
+      DB_NAME: nexabank_transactions
+      DB_USER: nexabank
+      DB_PASSWORD: nexabank123
+      ACCOUNT_SERVICE_HOST: account-service
+      AI_SERVICE_HOST: ai-service
+    depends_on:
+      postgres-transactions:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      account-service:
+        condition: service_started
+    ports:
+      - "8083:8083"
+
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: nexabank-notifications
+    <<: *java-defaults
+    environment:
+      <<: *common-env
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: nexabank
+      RABBITMQ_PASSWORD: nexabank123
+      MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-nexabank.demo@gmail.com}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-your-app-password}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+
+  audit-service:
+    build:
+      context: ./audit-service
+      dockerfile: Dockerfile
+    container_name: nexabank-audit
+    <<: *java-defaults
+    environment:
+      <<: *common-env
+      MONGO_HOST: mongodb
+      MONGO_DB: nexabank_audit
+      MONGO_USER: nexabank
+      MONGO_PASSWORD: nexabank123
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: nexabank-ai
+    <<: *java-defaults
+    environment:
+      <<: *common-env
+      DB_HOST: postgres-ai
+      DB_NAME: nexabank_ai
+      DB_USER: nexabank
+      DB_PASSWORD: nexabank123
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-your-openai-key-here}
+    depends_on:
+      postgres-ai:
+        condition: service_healthy
+    ports:
+      - "8086:8086"
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: nexabank-gateway
+    <<: *java-defaults
+    environment:
+      <<: *common-env
+      AUTH_SERVICE_HOST: auth-service
+      ACCOUNT_SERVICE_HOST: account-service
+      TRANSACTION_SERVICE_HOST: transaction-service
+      NOTIFICATION_SERVICE_HOST: notification-service
+      AUDIT_SERVICE_HOST: audit-service
+      AI_SERVICE_HOST: ai-service
+    depends_on:
+      - auth-service
+      - account-service
+      - transaction-service
+    ports:
+      - "8080:8080"
+
+  # ─────────────────────────────────────────────
+  # FRONTENDS
+  # ─────────────────────────────────────────────
+
+  frontend-angular:
+    build:
+      context: ./frontend-angular
+      dockerfile: Dockerfile
+    container_name: nexabank-angular
+    ports:
+      - "4200:80"
+    networks:
+      - nexabank-net
+    depends_on:
+      - api-gateway
+
+  frontend-react:
+    build:
+      context: ./frontend-react
+      dockerfile: Dockerfile
+    container_name: nexabank-react
+    ports:
+      - "3000:80"
+    networks:
+      - nexabank-net
+    depends_on:
+      - api-gateway
+
+  # ─────────────────────────────────────────────
+  # MONITORING
+  # ─────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: nexabank-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9091:9090"
+    networks:
+      - nexabank-net
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: nexabank-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: nexabank123
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3001:3000"
+    networks:
+      - nexabank-net
+    depends_on:
+      - prometheus

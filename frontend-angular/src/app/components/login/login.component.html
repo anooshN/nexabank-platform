@@ -1,0 +1,32 @@
+<div class="login-page">
+  <mat-card class="login-card">
+    <div class="brand-header">
+      <div class="brand-logo">N</div>
+      <h1>NexaBank</h1>
+      <p>Secure · Smart · Simple</p>
+    </div>
+    <mat-card-content>
+      <form [formGroup]="loginForm" (ngSubmit)="onSubmit()">
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Username</mat-label>
+          <input matInput formControlName="username">
+          <mat-icon matSuffix>person</mat-icon>
+        </mat-form-field>
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Password</mat-label>
+          <input matInput [type]="hidePass ? 'password' : 'text'" formControlName="password">
+          <button mat-icon-button matSuffix type="button" (click)="hidePass=!hidePass">
+            <mat-icon>{{hidePass ? 'visibility_off' : 'visibility'}}</mat-icon>
+          </button>
+        </mat-form-field>
+        <button mat-raised-button color="primary" type="submit" [disabled]="loginForm.invalid || loading" class="full-width submit-btn">
+          <mat-spinner *ngIf="loading" diameter="20" style="display:inline-block"></mat-spinner>
+          <span *ngIf="!loading">Sign In</span>
+        </button>
+      </form>
+      <div class="demo-hint">
+        <strong>Demo:</strong> admin / Admin@1234 &nbsp;|&nbsp; user1 / User@1234
+      </div>
+    </mat-card-content>
+  </mat-card>
+</div>
