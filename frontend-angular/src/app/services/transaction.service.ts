@@ -17,7 +17,7 @@ export interface PageResponse<T> {
 
 @Injectable({ providedIn: 'root' })
 export class TransactionService {
-  private readonly API = `${environment.apiUrl}/transactions`;
+  private readonly API = `${environment.transactionsUrl}/transactions`;
   constructor(private http: HttpClient) {}
 
   transfer(data: any): Observable<Transaction> {

@@ -1,0 +1,1 @@
+{"ast":null,"code":"export const environment = {\n  production: false,\n  apiUrl: 'http://localhost:8081/api',\n  accountsUrl: 'http://localhost:8082/api',\n  transactionsUrl: 'http://localhost:8083/api',\n  auditUrl: 'http://localhost:8085/api',\n  aiUrl: 'http://localhost:8086/api'\n};","map":null,"metadata":{},"sourceType":"module","externalDependencies":[]}

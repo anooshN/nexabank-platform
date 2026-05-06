@@ -1,0 +1,15 @@
+@use '@angular/material' as mat;
+
+@include mat.core();
+
+$primary: mat.define-palette(mat.$indigo-palette);
+$accent: mat.define-palette(mat.$amber-palette);
+
+$theme: mat.define-light-theme((
+  color: (primary: $primary, accent: $accent)
+));
+
+@include mat.all-component-themes($theme);
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Roboto, sans-serif; background: #f4f6f9; }

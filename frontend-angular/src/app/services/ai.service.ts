@@ -7,7 +7,7 @@ export interface ChatMessage { role: 'user' | 'bot'; content: string; timestamp:
 
 @Injectable({ providedIn: 'root' })
 export class AiService {
-  private readonly API = `${environment.apiUrl}/ai`;
+  private readonly API = `${environment.aiUrl}/ai`;
   private conversationId = `conv-${Date.now()}`;
   constructor(private http: HttpClient) {}
 

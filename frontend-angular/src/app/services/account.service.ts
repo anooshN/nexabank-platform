@@ -12,7 +12,7 @@ export interface Account {
 
 @Injectable({ providedIn: 'root' })
 export class AccountService {
-  private readonly API = `${environment.apiUrl}/accounts`;
+  private readonly API = `${environment.accountsUrl}/accounts`;
   constructor(private http: HttpClient) {}
   getMyAccounts(username: string): Observable<Account[]> {
     return this.http.get<Account[]>(`${this.API}/user/${username}`);
